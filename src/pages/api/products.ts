@@ -106,6 +106,13 @@ export default async function handler(
       setParsedCache(parsedRecords, filename);
     }
 
+    // Set cache headers for Vercel edge caching (30 minutes)
+    // Works on Vercel (edge cache) and locally (browser cache)
+    res.setHeader(
+      "Cache-Control",
+      "public, s-maxage=1800, stale-while-revalidate=60"
+    );
+
     if (allParam) {
       // Return all records
       const totalRecords = parsedRecords.length;

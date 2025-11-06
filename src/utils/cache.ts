@@ -15,7 +15,10 @@ type ParsedCacheEntry = {
 };
 
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const CACHE_DIR = path.join(process.cwd(), ".cache");
+// Use /tmp on Vercel (writable), .cache locally
+const CACHE_DIR = process.env.VERCEL
+  ? "/tmp"
+  : path.join(process.cwd(), ".cache");
 const CACHE_FILE = path.join(CACHE_DIR, "products.csv");
 const CACHE_META = path.join(CACHE_DIR, "cache.json");
 
@@ -160,47 +163,127 @@ export async function getOrFetchCSV(): Promise<{
     throw new Error("API configuration missing");
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  // Retry logic with exponential backoff
+  const maxRetries = 3;
+  let lastError: Error | null = null;
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-        "User-Agent": "Mozilla/5.0 (compatible; Next.js API)",
-      },
-      signal: controller.signal,
-    });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      // Increase timeout for retries (30s base, up to 60s)
+      const timeout = 30000 + attempt * 10000;
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch: ${response.statusText} (${response.status})`
+      try {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            "User-Agent": "Mozilla/5.0 (compatible; Next.js API)",
+          },
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // Handle rate limiting (429)
+        if (response.status === 429) {
+          const retryAfter = response.headers.get("Retry-After");
+          const waitTime = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : Math.min(1000 * Math.pow(2, attempt), 30000);
+
+          if (attempt < maxRetries) {
+            console.log(
+              `⏳ Rate limited (429). Waiting ${
+                waitTime / 1000
+              }s before retry ${attempt + 1}/${maxRetries}...`
+            );
+            await new Promise((resolve) => setTimeout(resolve, waitTime));
+            continue;
+          } else {
+            throw new Error(
+              `Rate limited (429). Please try again later. Retry-After: ${
+                retryAfter || "unknown"
+              }`
+            );
+          }
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch: ${response.statusText} (${response.status})`
+          );
+        }
+
+        const AdmZip = (await import("adm-zip")).default;
+        const zipBuffer = Buffer.from(await response.arrayBuffer());
+        const zip = new AdmZip(zipBuffer);
+        const zipEntries = zip.getEntries();
+
+        const csvEntry = zipEntries.find((entry: IZipEntry) =>
+          entry.entryName.endsWith(".csv")
+        );
+
+        if (!csvEntry) {
+          throw new Error("No CSV file found in the ZIP archive");
+        }
+
+        const csvContent = csvEntry.getData().toString("utf-8");
+        const filename = csvEntry.entryName;
+
+        // Cache in both memory and file system
+        setCachedCSV(csvContent, filename);
+        await setFileCache(csvContent, filename);
+        console.log("✅ Cached to memory and disk");
+
+        return { csvContent, filename };
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+
+        // Handle timeout and connection errors
+        if (
+          fetchError.name === "AbortError" ||
+          fetchError.code === "UND_ERR_CONNECT_TIMEOUT" ||
+          fetchError.message?.includes("timeout") ||
+          fetchError.message?.includes("ECONNRESET")
+        ) {
+          lastError = new Error(
+            `Connection timeout. Attempt ${attempt + 1}/${maxRetries + 1}`
+          );
+
+          if (attempt < maxRetries) {
+            const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 10000);
+            console.log(
+              `⏳ Connection timeout. Retrying in ${backoffDelay / 1000}s... (${
+                attempt + 1
+              }/${maxRetries})`
+            );
+            await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+            continue;
+          }
+        }
+
+        throw fetchError;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // If this is the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw lastError;
+      }
+
+      // For other errors, retry with exponential backoff
+      const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 10000);
+      console.log(
+        `⚠️ Error on attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${
+          backoffDelay / 1000
+        }s...`
       );
+      await new Promise((resolve) => setTimeout(resolve, backoffDelay));
     }
-
-    const AdmZip = (await import("adm-zip")).default;
-    const zipBuffer = Buffer.from(await response.arrayBuffer());
-    const zip = new AdmZip(zipBuffer);
-    const zipEntries = zip.getEntries();
-
-    const csvEntry = zipEntries.find((entry: IZipEntry) =>
-      entry.entryName.endsWith(".csv")
-    );
-
-    if (!csvEntry) {
-      throw new Error("No CSV file found in the ZIP archive");
-    }
-
-    const csvContent = csvEntry.getData().toString("utf-8");
-    const filename = csvEntry.entryName;
-
-    // Cache in both memory and file system
-    setCachedCSV(csvContent, filename);
-    await setFileCache(csvContent, filename);
-    console.log("✅ Cached to memory and disk");
-
-    return { csvContent, filename };
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  // Should never reach here, but TypeScript needs it
+  throw lastError || new Error("Failed to fetch after all retries");
 }

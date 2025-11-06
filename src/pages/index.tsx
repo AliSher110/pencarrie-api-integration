@@ -22,6 +22,7 @@ export const Home: NextPage = () => {
 		'Front Image',
 		'Title',
 		'﻿SKU',
+		'Single List Price',
 		'Type',
 		'Brand',
 		'Supplier Code'
@@ -136,6 +137,7 @@ export const Home: NextPage = () => {
 			'front image': 'Image',
 			'title': 'Name',
 			'sku': 'SKU',
+			'single list price': 'Price',
 			'type': 'Category',
 			'brand': 'Brand',
 			'supplier code': 'Supplier Code'
@@ -155,6 +157,19 @@ export const Home: NextPage = () => {
 		const cleanHeader = header.replace(/^\uFEFF/, '').trim();
 		const lowerHeader = cleanHeader.toLowerCase();
 		return lowerHeader === 'front image';
+	};
+
+	const isPriceField = (header: string): boolean => {
+		const cleanHeader = header.replace(/^\uFEFF/, '').trim();
+		const lowerHeader = cleanHeader.toLowerCase();
+		return lowerHeader === 'single list price';
+	};
+
+	const formatPrice = (value: string | undefined): string => {
+		if (!value) return "-";
+		const numValue = parseFloat(value);
+		if (isNaN(numValue)) return value;
+		return `${numValue.toFixed(2)}`;
 	};
 
 	return (
@@ -292,6 +307,10 @@ export const Home: NextPage = () => {
 															}}
 														/>
 													</div>
+												) : isPriceField(header) ? (
+													<p className="text-xs truncate max-w-xs" style={{ color: '#000000' }}>
+														{formatPrice(row[header])}
+													</p>
 												) : (
 													<p className="text-xs truncate max-w-xs" style={{ color: '#000000' }}>
 														{row[header] || "-"}
