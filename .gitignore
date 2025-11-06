@@ -39,3 +39,6 @@ yarn-error.log*
 *.tsbuildinfo
 
 build.css
+
+# cache
+.cache/

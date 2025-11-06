@@ -34,6 +34,12 @@ export const Home: NextPage = () => {
 					filename: data.filename,
 					data: data.data,
 				});
+				console.log("🔍 Pagination Debug:", {
+					currentPage: data.page || page,
+					totalPages: data.totalPages || 0,
+					canGoNext: (data.page || page) < (data.totalPages || 0),
+					canGoPrev: (data.page || page) > 1,
+				});
 			} else {
 				setError(data.error || "Failed to fetch page");
 			}
@@ -86,22 +92,30 @@ export const Home: NextPage = () => {
 							</div>
 						</div>
 					)}
-					{totalPages > 1 && (
-						<div className="mt-4 flex gap-2 flex-wrap items-center">
+					{currentData && totalPages > 0 && (
+						<div className="mt-6 flex gap-3 flex-wrap items-center justify-center">
 							<Button
 								onClick={handlePrevPage}
 								disabled={currentPage <= 1 || loading}
-								className={(currentPage <= 1 || loading) ? "opacity-50 cursor-not-allowed" : ""}
+								className={
+									currentPage <= 1 || loading
+										? "opacity-50 cursor-not-allowed"
+										: "hover:bg-gray-600"
+								}
 							>
 								← Previous
 							</Button>
-							<span className="px-4 text-gray-700 dark:text-gray-300">
-								Page {currentPage} / {totalPages}
+							<span className="px-4 py-2 text-gray-700 dark:text-gray-300 font-medium">
+								Page {currentPage} of {totalPages}
 							</span>
 							<Button
 								onClick={handleNextPage}
 								disabled={currentPage >= totalPages || loading}
-								className={(currentPage >= totalPages || loading) ? "opacity-50 cursor-not-allowed" : ""}
+								className={
+									currentPage >= totalPages || loading
+										? "opacity-50 cursor-not-allowed"
+										: "hover:bg-gray-600"
+								}
 							>
 								Next →
 							</Button>

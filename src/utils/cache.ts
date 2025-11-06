@@ -1,4 +1,6 @@
 import type { IZipEntry } from "adm-zip";
+import { promises as fs } from "fs";
+import path from "path";
 
 type CacheEntry = {
   csvContent: string;
@@ -6,43 +8,150 @@ type CacheEntry = {
   timestamp: number;
 };
 
+type ParsedCacheEntry = {
+  records: Record<string, string>[];
+  filename: string;
+  timestamp: number;
+};
+
 const CACHE_TTL_MS = 30 * 60 * 1000;
-let cache: CacheEntry | null = null;
+const CACHE_DIR = path.join(process.cwd(), ".cache");
+const CACHE_FILE = path.join(CACHE_DIR, "products.csv");
+const CACHE_META = path.join(CACHE_DIR, "cache.json");
+
+let memoryCache: CacheEntry | null = null;
+let parsedCache: ParsedCacheEntry | null = null;
+
+async function ensureCacheDir(): Promise<void> {
+  try {
+    await fs.mkdir(CACHE_DIR, { recursive: true });
+  } catch (error) {
+    console.error("Failed to create cache directory:", error);
+  }
+}
+
+async function getFileCache(): Promise<CacheEntry | null> {
+  try {
+    await ensureCacheDir();
+    const metaContent = await fs.readFile(CACHE_META, "utf-8");
+    const meta = JSON.parse(metaContent);
+    const age = Date.now() - meta.timestamp;
+    if (age > CACHE_TTL_MS) {
+      await clearFileCache();
+      return null;
+    }
+
+    const csvContent = await fs.readFile(CACHE_FILE, "utf-8");
+    return { csvContent, filename: meta.filename, timestamp: meta.timestamp };
+  } catch {
+    return null;
+  }
+}
+
+async function setFileCache(
+  csvContent: string,
+  filename: string
+): Promise<void> {
+  try {
+    await ensureCacheDir();
+    const meta = {
+      filename,
+      timestamp: Date.now(),
+    };
+
+    await Promise.all([
+      fs.writeFile(CACHE_FILE, csvContent, "utf-8"),
+      fs.writeFile(CACHE_META, JSON.stringify(meta, null, 2), "utf-8"),
+    ]);
+  } catch (error) {
+    console.error("Failed to write cache file:", error);
+  }
+}
+
+async function clearFileCache(): Promise<void> {
+  try {
+    await Promise.all([
+      fs.unlink(CACHE_FILE).catch(() => {}),
+      fs.unlink(CACHE_META).catch(() => {}),
+    ]);
+  } catch (error) {
+    // Ignore errors
+  }
+}
 
 export function getCachedCSV(): CacheEntry | null {
-  if (!cache) return null;
+  if (!memoryCache) return null;
 
-  const age = Date.now() - cache.timestamp;
+  const age = Date.now() - memoryCache.timestamp;
   if (age > CACHE_TTL_MS) {
-    cache = null;
+    memoryCache = null;
     return null;
   }
 
-  return cache;
+  return memoryCache;
 }
 
 export function setCachedCSV(csvContent: string, filename: string): void {
-  cache = {
+  memoryCache = {
     csvContent,
     filename,
     timestamp: Date.now(),
   };
 }
 
-export function clearCache(): void {
-  cache = null;
+export function getParsedCache(): ParsedCacheEntry | null {
+  if (!parsedCache) return null;
+
+  const age = Date.now() - parsedCache.timestamp;
+  if (age > CACHE_TTL_MS) {
+    parsedCache = null;
+    return null;
+  }
+
+  return parsedCache;
+}
+
+export function setParsedCache(
+  records: Record<string, string>[],
+  filename: string
+): void {
+  parsedCache = {
+    records,
+    filename,
+    timestamp: Date.now(),
+  };
+}
+
+export async function clearCache(): Promise<void> {
+  memoryCache = null;
+  parsedCache = null;
+  await clearFileCache();
 }
 
 export async function getOrFetchCSV(): Promise<{
   csvContent: string;
   filename: string;
 }> {
-  const cached = getCachedCSV();
-  if (cached) {
-    console.log("✅ Cache hit");
-    return { csvContent: cached.csvContent, filename: cached.filename };
+  // Check in-memory cache first
+  const memoryCached = getCachedCSV();
+  if (memoryCached) {
+    console.log("✅ Memory cache hit");
+    return {
+      csvContent: memoryCached.csvContent,
+      filename: memoryCached.filename,
+    };
   }
 
+  // Check file system cache
+  const fileCached = await getFileCache();
+  if (fileCached) {
+    console.log("✅ File cache hit");
+    // Load into memory for faster subsequent access
+    setCachedCSV(fileCached.csvContent, fileCached.filename);
+    return { csvContent: fileCached.csvContent, filename: fileCached.filename };
+  }
+
+  // Cache miss - fetch from external API
   console.log("📥 Fetching from external API");
   const url = process.env.EXTERNAL_API_URL;
   const authToken = process.env.AUTH_TOKEN;
@@ -85,8 +194,10 @@ export async function getOrFetchCSV(): Promise<{
     const csvContent = csvEntry.getData().toString("utf-8");
     const filename = csvEntry.entryName;
 
+    // Cache in both memory and file system
     setCachedCSV(csvContent, filename);
-    console.log("✅ Cached");
+    await setFileCache(csvContent, filename);
+    console.log("✅ Cached to memory and disk");
 
     return { csvContent, filename };
   } finally {
