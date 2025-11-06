@@ -17,7 +17,28 @@ type ProductsResponse = {
   error?: string;
 };
 
-const PAGE_SIZE = 5000;
+const DEFAULT_PAGE_SIZE = 500;
+
+/**
+ * Get page size from query parameter (accepts any positive integer)
+ */
+function getPageSize(perPageParam: string | string[] | undefined): number {
+  if (!perPageParam) {
+    return DEFAULT_PAGE_SIZE;
+  }
+
+  const perPage = parseInt(
+    Array.isArray(perPageParam) ? perPageParam[0] : perPageParam,
+    10
+  );
+
+  // Accept any positive integer, default to 500 if invalid
+  if (isNaN(perPage) || perPage < 1) {
+    return DEFAULT_PAGE_SIZE;
+  }
+
+  return perPage;
+}
 
 /**
  * Get a page from parsed records (much faster than re-parsing CSV)
@@ -25,7 +46,7 @@ const PAGE_SIZE = 5000;
 function getPageFromParsed(
   allRecords: Record<string, string>[],
   page: number,
-  pageSize = PAGE_SIZE
+  pageSize: number
 ): {
   records: Record<string, string>[];
   totalRecords: number;
@@ -75,51 +96,43 @@ export default async function handler(
     const { csvContent, filename } = await getOrFetchCSV();
     const allParam = req.query.all === "true";
     const page = Math.max(parseInt(req.query.page as string, 10) || 1, 1);
+    const pageSize = getPageSize(req.query.perPage);
 
     // Check if we have parsed records cached
     let parsedRecords = getParsedCache()?.records;
 
     if (!parsedRecords) {
-      // Parse CSV once and cache it
-      console.log("📝 Parsing CSV (first time or cache expired)");
       parsedRecords = await parseAllCSV(csvContent);
       setParsedCache(parsedRecords, filename);
-      console.log(`✅ Parsed and cached ${parsedRecords.length} records`);
-    } else {
-      console.log("✅ Using cached parsed records");
     }
 
     if (allParam) {
       // Return all records
       const totalRecords = parsedRecords.length;
-      const totalPages = Math.ceil(totalRecords / PAGE_SIZE);
+      const totalPages = Math.ceil(totalRecords / pageSize);
 
       return res.status(200).json({
         success: true,
         data: parsedRecords,
-        pageSize: PAGE_SIZE,
+        pageSize,
         totalPages,
         totalRecords,
         filename,
       });
     }
 
-    // Get page from cached parsed records (instant!)
+    // Get page from cached parsed records
     const { records, totalRecords, totalPages } = getPageFromParsed(
       parsedRecords,
       page,
-      PAGE_SIZE
-    );
-
-    console.log(
-      `📊 Page ${page}: ${records.length} records / ${totalRecords} total (${totalPages} pages)`
+      pageSize
     );
 
     return res.status(200).json({
       success: true,
       data: records,
       page,
-      pageSize: PAGE_SIZE,
+      pageSize,
       totalPages,
       totalRecords,
       filename,
