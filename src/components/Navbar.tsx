@@ -1,56 +1,45 @@
+import Link from "next/link";
+import { useRouter } from "next/router";
 import { FC } from "react";
 
-interface NavbarProps {
-  pages: { name: string; href: string; current: boolean }[];
-}
+const navPages = [
+  { name: "Products", href: "/products" },
+  { name: "Orders", href: "/orders" },
+];
 
-export const Navbar: FC<NavbarProps> = ({ pages }) => {
+export const Navbar: FC = () => {
+  const router = useRouter();
+  const currentPath = router.pathname;
+
   return (
-    <nav className="p-4 mt-0 w-full" style={{ 
-      backgroundColor: '#7C3AED', 
-      borderBottom: '1px solid #7C3AED',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-    }}>
-      <div className="container mx-auto flex items-center">
-        <div className="flex font-extrabold">
-          <a
-            className="flex text-base no-underline"
-            style={{ color: '#FFFFFF' }}
-            href="/"
-            onMouseEnter={(e) => e.currentTarget.style.color = 'rgba(255, 255, 255, 0.8)'}
-            onMouseLeave={(e) => e.currentTarget.style.color = '#FFFFFF'}
-          >
-            <span className="hidden w-0 md:w-auto md:block pl-1">Homepage</span>
-          </a>
-        </div>
-        <div className="flex pl-4 text-sm">
-          <ul className="list-reset flex justify-between flex-1 md:flex-none items-center">
-            {pages.map((page) => (
-              <li className="mr-2" key={page.name}>
-                <a
-                  className="inline-block py-2 px-2 no-underline"
-                  style={{ 
-                    color: page.current ? '#FFFFFF' : 'rgba(255, 255, 255, 0.8)',
-                    fontWeight: page.current ? 'bold' : 'normal'
-                  }}
-                  href={page.href}
-                  onMouseEnter={(e) => {
-                    if (!page.current) {
-                      e.currentTarget.style.color = '#FFFFFF';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!page.current) {
-                      e.currentTarget.style.color = 'rgba(255, 255, 255, 0.8)';
-                    }
-                  }}
-                >
-                  {page.name}
-                </a>
+    <nav className="bg-purple-600 shadow-md w-full">
+      <div className="container mx-auto flex items-center justify-between p-4">
+        {/* Logo / Homepage */}
+        <Link href="/">
+          <span className="text-white font-extrabold text-lg cursor-pointer hover:opacity-80 transition-opacity">
+            Homepage
+          </span>
+        </Link>
+
+        {/* Navigation Links */}
+        <ul className="flex space-x-4 text-sm">
+          {navPages.map((page) => {
+            const isCurrent = currentPath === page.href;
+            return (
+              <li key={page.name}>
+                <Link href={page.href}>
+                  <span
+                    className={`px-3 py-2 rounded-md font-medium text-white cursor-pointer transition-opacity ${
+                      isCurrent ? "font-bold underline" : "hover:opacity-80"
+                    }`}
+                  >
+                    {page.name}
+                  </span>
+                </Link>
               </li>
-            ))}
-          </ul>
-        </div>
+            );
+          })}
+        </ul>
       </div>
     </nav>
   );
